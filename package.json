@@ -1,6 +1,12 @@
 {
   "name": "ghcp-sync",
   "version": "1.0.0",
+  "description": "Sync GitHub Copilot configuration between machines via a lightweight Express server and CLI client",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aiguy611/ghcp-sync.git"
+  },
+  "license": "MIT",
   "type": "module",
   "bin": {
     "ghcp-sync": "./dist/client/cli.js"
