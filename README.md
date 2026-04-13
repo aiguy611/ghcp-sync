@@ -1,6 +1,6 @@
 # ghcp-sync
 
-Sync your GitHub Copilot configuration between machines via a lightweight Express server and CLI client.
+Sync your GitHub Copilot configuration between machines via a lightweight Express server, a CLI client, or directly from any git repository.
 
 ## What It Syncs
 
@@ -13,6 +13,31 @@ Sync your GitHub Copilot configuration between machines via a lightweight Expres
 - **VS Code Copilot settings** -- Key-level merge of `github.copilot.*`, `chat.promptFilesLocations.*`, `chat.instructionsFilesLocations.*`, and `chat.agent.*` keys from VS Code's `settings.json`
 
 Excluded from sync: `node_modules`, `dist`, `.git`, `logs`, `sessions`, `cache`.
+
+## Pull Modes
+
+ghcp-sync supports two pull modes:
+
+### 1. Server pull: `ghcp-sync pull`
+
+Downloads your Copilot config from a ghcp-sync server. Requires `GHCP_SYNC_URL` and `GHCP_SYNC_KEY` environment variables.
+
+### 2. Repo pull: `ghcp-sync pull --from <url>`
+
+Imports Copilot config directly from any git repository's `.github/` directory. No server needed. Any git URL works -- GitHub, GitLab, Bitbucket, SSH, HTTPS, or local paths.
+
+The `--from` flag performs a shallow clone, copies matching content from `.github/` into the target directory, and cleans up the clone automatically.
+
+**Content mapping** (direct copy, no format conversion):
+
+| Repository source | Local destination |
+|---|---|
+| `.github/agents/` | `agents/` |
+| `.github/skills/` | `skills/` |
+| `.github/prompts/` | `prompts/` |
+| `.github/hooks/` | `hooks/` |
+
+Both pull modes support the `--target` and `--only` flags.
 
 ## Architecture
 
@@ -105,8 +130,8 @@ ghcp-sync pull
 
 | Variable            | Used By | Default       | Description                          |
 |---------------------|---------|---------------|--------------------------------------|
-| `GHCP_SYNC_KEY`    | Both    | *(required)*  | Shared secret for Bearer auth        |
-| `GHCP_SYNC_URL`    | Client  | *(required)*  | Server URL (e.g. `http://host:3457`) |
+| `GHCP_SYNC_KEY`    | Both    | *(required)*  | Shared secret for Bearer auth (not needed with `--from`) |
+| `GHCP_SYNC_URL`    | Client  | *(required)*  | Server URL, e.g. `http://host:3457` (not needed with `--from`) |
 | `GHCP_SYNC_PORT`   | Server  | `3457`        | Port the server listens on           |
 | `GHCP_SYNC_DATA_DIR` | Server | `./data`      | Directory to store config tarball    |
 | `COPILOT_HOME`     | Client  | `~/.copilot`  | Override the copilot config directory|
@@ -118,9 +143,11 @@ ghcp-sync <push|pull> [options]
 
 Commands:
   push                Upload local Copilot config to server
-  pull [options]      Download Copilot config from server
+  pull                Download Copilot config from server or git repo
 
 Pull options:
+  --from <url>        Pull from a git repo instead of the sync server
+                      Accepts any git URL (GitHub, GitLab, Bitbucket, SSH, local paths)
   --target <dir>      Extract to directory (default: current directory)
   --only <types>      Only extract specified content types (comma-separated)
                       Valid types: agents, skills, prompts, hooks
@@ -149,15 +176,26 @@ ghcp-sync pull
 # Pull complete. Extracted 8 entries to /Users/you/.copilot
 ```
 
+### Pull from a git repository (--from)
+
+```bash
+# Pull from any public or private git repo -- no server needed
+ghcp-sync pull --from https://github.com/org/repo
+
+# Use SSH URLs
+ghcp-sync pull --from git@github.com:org/repo.git --only agents,prompts
+
+# Pull to a specific directory
+ghcp-sync pull --from https://github.com/aiguy611/ghcp-tools --target ~/.copilot
+```
+
 ### Pull to a specific directory
 
 ```bash
 # Extract config to a custom location instead of the current directory
 ghcp-sync pull --target ~/my-copilot-backup
-# Downloading config from server...
-# Tarball verified: 8 entries.
-# Extracting config to /Users/you/my-copilot-backup...
-# Pull complete. Extracted 8 entries to /Users/you/my-copilot-backup
+# Works with both server pull and --from
+ghcp-sync pull --from https://github.com/org/repo --target ~/my-copilot-backup
 ```
 
 ### Pull only specific content types
@@ -165,10 +203,9 @@ ghcp-sync pull --target ~/my-copilot-backup
 ```bash
 # Only pull agents and skills (skip hooks, prompts, and root files)
 ghcp-sync pull --only agents,skills
-# Downloading config from server...
-# Tarball verified: 8 entries.
-# Extracting only [agents, skills] to /Users/you/.copilot...
-# Pull complete. Extracted 8 entries to /Users/you/.copilot
+
+# Combine --from with --only
+ghcp-sync pull --from https://github.com/org/repo --only agents,skills
 ```
 
 ### Combine --target and --only
@@ -176,6 +213,9 @@ ghcp-sync pull --only agents,skills
 ```bash
 # Pull only prompts to a specific directory
 ghcp-sync pull --target ./project-config --only prompts
+
+# Same with --from
+ghcp-sync pull --from https://github.com/org/repo --target ./project-config --only prompts
 ```
 
 ### Health check
@@ -186,6 +226,14 @@ curl http://my-server:3457/health
 ```
 
 The `/health` endpoint does not require authentication.
+
+## Companion Repos
+
+- **[ghcp-tools](https://github.com/aiguy611/ghcp-tools)** -- A pre-built bundle of agents, skills, prompts, and hooks ready to use with GitHub Copilot. Pull it directly:
+
+  ```bash
+  ghcp-sync pull --from https://github.com/aiguy611/ghcp-tools --target ~/.copilot
+  ```
 
 ## macOS LaunchAgent (Auto-Start on Boot)
 
@@ -241,13 +289,22 @@ launchctl load ~/Library/LaunchAgents/com.ghcp-sync.server.plist
 4. The server writes to a temp file first, then atomically rotates: current becomes `.bak`, temp becomes current.
 5. The temporary VS Code settings directory is cleaned up locally.
 
-### Pull flow
+### Pull flow (server mode)
 
 1. The client downloads the tarball via `GET /sync` to a temp file in the target directory.
 2. The tarball is verified by listing its entries (integrity check).
 3. The tarball is extracted into the target directory (current directory by default, or the path specified by `--target`).
 4. If `--only` is specified, only entries matching the given top-level types (e.g. `agents`, `skills`) are extracted; all others are skipped.
 5. Temp files are cleaned up.
+
+### Pull flow (--from repo mode)
+
+1. The client verifies that `git` is installed.
+2. A shallow clone (`--depth 1`) of the specified repository is created in a temporary directory.
+3. The `.github/` directory is located in the cloned repo. If it does not exist, the operation fails with an error.
+4. Content directories (`agents/`, `skills/`, `prompts/`, `hooks/`) are copied directly from `.github/` to the target directory with no format conversion. Skills are copied as subdirectories; other content types are copied as individual files (README.md files are skipped).
+5. If `--only` is specified, only the listed content types are copied.
+6. The temporary clone is cleaned up.
 
 ### VS Code Settings Handling
 
