@@ -19,6 +19,8 @@ export const INCLUDED_FILES = [
 export const INCLUDED_DIRS = [
   "agents",
   "hooks",
+  "skills",
+  "prompts",
 ];
 
 // Patterns to exclude within included directories
