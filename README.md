@@ -8,6 +8,8 @@ Sync your GitHub Copilot configuration between machines via a lightweight Expres
 - **~/.copilot/copilot-instructions.md** -- Custom instructions for Copilot
 - **~/.copilot/agents/** -- Agent definitions (recursive)
 - **~/.copilot/hooks/** -- Hook scripts (recursive)
+- **~/.copilot/skills/** -- Skill definitions (recursive)
+- **~/.copilot/prompts/** -- Reusable prompts (recursive)
 - **VS Code Copilot settings** -- Key-level merge of `github.copilot.*`, `chat.promptFilesLocations.*`, `chat.instructionsFilesLocations.*`, and `chat.agent.*` keys from VS Code's `settings.json`
 
 Excluded from sync: `node_modules`, `dist`, `.git`, `logs`, `sessions`, `cache`.
@@ -21,12 +23,14 @@ Excluded from sync: `node_modules`, `dist`, `.git`, `logs`, `sessions`, `cache`.
  |   config.json   | tarball  |   Express :3457   | tarball  |   config.json   |
  |   agents/       |--------->|                   |--------->|   agents/       |
  |   hooks/        |  PUT     |   data/           |  GET     |   hooks/        |
- |   copilot-      | /sync    |   copilot-config  | /sync    |   copilot-      |
- |   instructions  |          |   .tar.gz         |          |   instructions  |
- |                 |          |                   |          |                 |
- | VS Code         |          |   Auth: Bearer    |          | VS Code         |
- | settings.json   |          |   API key         |          | settings.json   |
- | (copilot keys)  |          |   (timing-safe)   |          | (key-level      |
+ |   skills/       | /sync    |   copilot-config  | /sync    |   skills/       |
+ |   prompts/      |          |   .tar.gz         |          |   prompts/      |
+ |   copilot-      |          |                   |          |   copilot-      |
+ |   instructions  |          |   Auth: Bearer    |          |   instructions  |
+ |                 |          |   API key         |          |                 |
+ | VS Code         |          |   (timing-safe)   |          | VS Code         |
+ | settings.json   |          |                   |          | settings.json   |
+ | (copilot keys)  |          |                   |          | (key-level      |
  +-----------------+          +-------------------+          |  merge)         |
                                                              +-----------------+
 ```
@@ -76,10 +80,16 @@ pnpm push
 # or
 node dist/client/cli.js push
 
-# Pull config from server
+# Pull config from server (extracts to current directory by default)
 pnpm pull
 # or
 node dist/client/cli.js pull
+
+# Pull to a specific directory
+node dist/client/cli.js pull --target ~/my-copilot-config
+
+# Pull only specific content types
+node dist/client/cli.js pull --only agents,skills
 ```
 
 ### 5. Global CLI install (optional)
@@ -101,6 +111,21 @@ ghcp-sync pull
 | `GHCP_SYNC_DATA_DIR` | Server | `./data`      | Directory to store config tarball    |
 | `COPILOT_HOME`     | Client  | `~/.copilot`  | Override the copilot config directory|
 
+## CLI Usage
+
+```
+ghcp-sync <push|pull> [options]
+
+Commands:
+  push                Upload local Copilot config to server
+  pull [options]      Download Copilot config from server
+
+Pull options:
+  --target <dir>      Extract to directory (default: current directory)
+  --only <types>      Only extract specified content types (comma-separated)
+                      Valid types: agents, skills, prompts, hooks
+```
+
 ## Usage Examples
 
 ### Push config to server
@@ -116,13 +141,41 @@ ghcp-sync push
 ### Pull config from server
 
 ```bash
+# Pull everything to the current directory
 ghcp-sync pull
 # Downloading config from server...
 # Tarball verified: 8 entries.
-# Cleaning existing config...
-# Extracting config...
-# Merged 5 copilot settings into VS Code.
+# Extracting config to /Users/you/.copilot...
 # Pull complete. Extracted 8 entries to /Users/you/.copilot
+```
+
+### Pull to a specific directory
+
+```bash
+# Extract config to a custom location instead of the current directory
+ghcp-sync pull --target ~/my-copilot-backup
+# Downloading config from server...
+# Tarball verified: 8 entries.
+# Extracting config to /Users/you/my-copilot-backup...
+# Pull complete. Extracted 8 entries to /Users/you/my-copilot-backup
+```
+
+### Pull only specific content types
+
+```bash
+# Only pull agents and skills (skip hooks, prompts, and root files)
+ghcp-sync pull --only agents,skills
+# Downloading config from server...
+# Tarball verified: 8 entries.
+# Extracting only [agents, skills] to /Users/you/.copilot...
+# Pull complete. Extracted 8 entries to /Users/you/.copilot
+```
+
+### Combine --target and --only
+
+```bash
+# Pull only prompts to a specific directory
+ghcp-sync pull --target ./project-config --only prompts
 ```
 
 ### Health check
@@ -182,7 +235,7 @@ launchctl load ~/Library/LaunchAgents/com.ghcp-sync.server.plist
 
 ### Push flow
 
-1. The client scans `~/.copilot/` for allowlisted files and directories (`config.json`, `copilot-instructions.md`, `agents/`, `hooks/`).
+1. The client scans `~/.copilot/` for allowlisted files and directories (`config.json`, `copilot-instructions.md`, `agents/`, `hooks/`, `skills/`, `prompts/`).
 2. It extracts `github.copilot.*` and related keys from your VS Code `settings.json`, writes them to a temporary file inside `~/.copilot/__vscode_settings/copilot-settings.json`.
 3. Everything is packed into a gzipped tarball and streamed via `PUT /sync` to the server.
 4. The server writes to a temp file first, then atomically rotates: current becomes `.bak`, temp becomes current.
@@ -190,12 +243,11 @@ launchctl load ~/Library/LaunchAgents/com.ghcp-sync.server.plist
 
 ### Pull flow
 
-1. The client downloads the tarball via `GET /sync` to a temp file.
+1. The client downloads the tarball via `GET /sync` to a temp file in the target directory.
 2. The tarball is verified by listing its entries (integrity check).
-3. Existing synced files/directories in `~/.copilot/` are deleted.
-4. The tarball is extracted into `~/.copilot/`.
-5. If VS Code settings were included, they are **merged** into the local `settings.json` -- existing copilot keys are removed and replaced with the incoming ones. Non-copilot keys are untouched.
-6. Temp files are cleaned up.
+3. The tarball is extracted into the target directory (current directory by default, or the path specified by `--target`).
+4. If `--only` is specified, only entries matching the given top-level types (e.g. `agents`, `skills`) are extracted; all others are skipped.
+5. Temp files are cleaned up.
 
 ### VS Code Settings Handling
 
@@ -255,7 +307,7 @@ Neither `~/.copilot/` files nor VS Code copilot settings were found. Ensure at l
 
 ### Large tarball or unexpected files
 
-Check that `node_modules`, `dist`, `.git`, `logs`, `sessions`, and `cache` directories aren't nested inside `~/.copilot/agents/` or `~/.copilot/hooks/`. These are excluded by the filter, but parent directories containing them will still be traversed.
+Check that `node_modules`, `dist`, `.git`, `logs`, `sessions`, and `cache` directories aren't nested inside `~/.copilot/agents/`, `~/.copilot/hooks/`, `~/.copilot/skills/`, or `~/.copilot/prompts/`. These are excluded by the filter, but parent directories containing them will still be traversed.
 
 ## License
 
