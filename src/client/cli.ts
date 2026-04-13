@@ -6,16 +6,23 @@ import { pull } from "./pull.js";
 const command = process.argv[2];
 
 if (!command || !["push", "pull"].includes(command)) {
-  console.error("Usage: ghcp-sync <push|pull>");
+  console.error("Usage: ghcp-sync <push|pull> [options]");
   console.error("");
   console.error("Commands:");
-  console.error("  push    Upload local Copilot config to server");
-  console.error("  pull    Download Copilot config from server");
+  console.error("  push                Upload local Copilot config to server");
+  console.error("  pull [--target dir] Download Copilot config from server (default: .)");
   console.error("");
   console.error("Environment variables:");
   console.error("  GHCP_SYNC_URL    Server URL (e.g. http://my-server:3457)");
   console.error("  GHCP_SYNC_KEY    Shared API key for authentication");
   process.exit(1);
+}
+
+// Parse --target flag for pull
+let target = ".";
+const targetIdx = process.argv.indexOf("--target");
+if (targetIdx !== -1 && process.argv[targetIdx + 1]) {
+  target = process.argv[targetIdx + 1];
 }
 
 const serverUrl = process.env.GHCP_SYNC_URL;
@@ -37,7 +44,7 @@ async function main() {
     if (command === "push") {
       await push(serverUrl!, apiKey!);
     } else {
-      await pull(serverUrl!, apiKey!);
+      await pull(serverUrl!, apiKey!, target);
     }
   } catch (err) {
     if (err instanceof Error) {
