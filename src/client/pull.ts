@@ -3,7 +3,7 @@ import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
 import * as tar from "tar";
-export async function pull(serverUrl: string, apiKey: string, target: string): Promise<void> {
+export async function pull(serverUrl: string, apiKey: string, target: string, only?: string[]): Promise<void> {
   const targetDir = path.resolve(target);
   fs.mkdirSync(targetDir, { recursive: true });
 
@@ -30,11 +30,22 @@ export async function pull(serverUrl: string, apiKey: string, target: string): P
   console.log(`Tarball verified: ${entryCount} entries.`);
 
   // Step 3: Extract tarball
-  console.log(`Extracting config to ${targetDir}...`);
+  if (only && only.length > 0) {
+    console.log(`Extracting only [${only.join(", ")}] to ${targetDir}...`);
+  } else {
+    console.log(`Extracting config to ${targetDir}...`);
+  }
   await tar.extract({
     file: tempTarball,
     cwd: targetDir,
     preserveOwner: false,
+    filter: only && only.length > 0
+      ? (entryPath: string) => {
+          // entryPath uses "/" separators; first segment is the top-level dir/file
+          const firstSegment = entryPath.split("/")[0];
+          return only.includes(firstSegment);
+        }
+      : undefined,
   });
 
   // Step 4: Cleanup temp tarball

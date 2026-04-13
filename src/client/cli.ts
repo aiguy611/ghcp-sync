@@ -10,7 +10,13 @@ if (!command || !["push", "pull"].includes(command)) {
   console.error("");
   console.error("Commands:");
   console.error("  push                Upload local Copilot config to server");
-  console.error("  pull [--target dir] Download Copilot config from server (default: .)");
+  console.error("  pull [--target dir] [--only types] Download Copilot config from server");
+  console.error("");
+  console.error("Pull options:");
+  console.error("  --target <dir>     Extract to directory (default: current directory)");
+  console.error("  --only <types>     Only extract specified content types (comma-separated)");
+  console.error("                     Valid types: agents, skills, prompts, hooks");
+  console.error("                     Example: --only agents,skills,prompts");
   console.error("");
   console.error("Environment variables:");
   console.error("  GHCP_SYNC_URL    Server URL (e.g. http://my-server:3457)");
@@ -23,6 +29,21 @@ let target = ".";
 const targetIdx = process.argv.indexOf("--target");
 if (targetIdx !== -1 && process.argv[targetIdx + 1]) {
   target = process.argv[targetIdx + 1];
+}
+
+// Parse --only flag for pull
+const VALID_ONLY_VALUES = ["agents", "skills", "prompts", "hooks"];
+let only: string[] | undefined;
+const onlyIdx = process.argv.indexOf("--only");
+if (onlyIdx !== -1 && process.argv[onlyIdx + 1]) {
+  const raw = process.argv[onlyIdx + 1].split(",").map((s) => s.trim()).filter(Boolean);
+  const invalid = raw.filter((v) => !VALID_ONLY_VALUES.includes(v));
+  if (invalid.length > 0) {
+    console.error(`Error: Invalid --only value(s): ${invalid.join(", ")}`);
+    console.error(`Valid values: ${VALID_ONLY_VALUES.join(", ")}`);
+    process.exit(1);
+  }
+  only = raw;
 }
 
 const serverUrl = process.env.GHCP_SYNC_URL;
@@ -44,7 +65,7 @@ async function main() {
     if (command === "push") {
       await push(serverUrl!, apiKey!);
     } else {
-      await pull(serverUrl!, apiKey!, target);
+      await pull(serverUrl!, apiKey!, target, only);
     }
   } catch (err) {
     if (err instanceof Error) {
